@@ -70,27 +70,58 @@ void runcmd(struct cmd *cmd)
                 exit(0);
             // Eliminar el mensaje de error e implementar
             // la ejecución de comandos.
-            fprintf(stderr, "EXEC no implementado\n");
+            execvp(ecmd->argv[0], ecmd->argv);
+
+            perror("ocurrio un error a la hora de ejecutar el comando");
             break;
 
         case REDIR:
             // Eliminar el mensaje de error e implementar
             // la redirección de entrada y salida estándar.
-            fprintf(stderr, "REDIR no implementado\n");
-            /* USAR el siguiente código para castear cmd a redircmd
             rcmd = (struct redircmd *) cmd;
+            close (rcmd->fd);
+            unsigned int fd = open (rcmd->file, rcmd->mode, 0666);
+
+            if (fd < 0) {
+                perror("Redireccionamiento invalido");
+                exit(-1);
+            }
             runcmd(rcmd->cmd);
-            */
             break;
 
         case PIPE:
             // Eliminar el mensaje de error e implementar
             // la interconexión de procesos mediante tuberías
-            fprintf(stderr, "PIPE no implementado");
-            /* USAR el siguiente código para castear cmd a redircmd
             pcmd = (struct pipecmd *) cmd;
-            runcmd(pcmd->left);
-            */
+
+            int pipe_fd[2];
+            if(pipe(pipe_fd) < 0){
+                perror("Error al crear la tuberia :,(|)");
+                exit(-1);
+            }
+
+            //procesos izquierdo
+            if (fork() == 0) {  
+                close(pipe_fd[0]);       
+                dup2(pipe_fd[1], STDOUT_FILENO);     
+                close(pipe_fd[1]);       
+                runcmd(pcmd->left); 
+                exit(0);
+            }
+        
+            //proceso derecho
+            if (fork() == 0) {  
+                close(pipe_fd[1]);       
+                dup2(pipe_fd[0], STDIN_FILENO);     
+                close(pipe_fd[0]);       
+                runcmd(pcmd->right); 
+                exit(0);
+            }
+            
+            close(pipe_fd[0]);
+            close(pipe_fd[1]);
+            wait(NULL);
+            wait(NULL);
             break;
     }
     exit(0);
@@ -189,47 +220,61 @@ struct cmd *pipecmd(struct cmd *left, struct cmd *right)
 char whitespace[] = " \t\r\n\v";
 char symbols[] = "<|>";
 
-int gettoken(char **ps, char *es, char **q, char **eq)
+int
+gettoken(char **ps, char *es, char **q, char **eq)
 {
-    char *s;
+    char *s = *ps;
     int ret;
 
-    s = *ps;
-    while (s < es && strchr(whitespace, *s)) {
+    // Saltear espacios en blanco
+    while (s < es && strchr(whitespace, *s))
         s++;
-    }
-    if (q) {
+
+    if (q)
         *q = s;
-    }
-    ret = *s;
-    switch (*s) {
-        case 0:
-            break;
+
+    if (s >= es) {
+        ret = 0;
+    } else {
+        switch (*s) {
         case '|':
         case '<':
+        case '>':
+            ret = *s;
             s++;
             break;
-        case '>':
-            s++;
+        case '"':
+            // Comienzo de token entre comillas
+            s++;               // saltear la comilla inicial
+            if (q)
+                *q = s;
+            while (s < es && *s != '"')
+                s++;           // buscar el cierre de comillas
+            ret = 'a';         // token normal
+            if (eq)
+                *eq = s;
+            if (s < es)
+                s++;           // saltear la comilla final
             break;
         default:
+            // Token normal (hasta espacio o símbolo especial)
             ret = 'a';
-            while (s < es && !strchr(whitespace, *s) && !strchr(symbols, *s)) {
+            while (s < es && !strchr(whitespace, *s) && !strchr(symbols, *s))
                 s++;
-            }
+            if (eq)
+                *eq = s;
             break;
+        }
     }
 
-    if (eq) {
-        *eq = s;
-    }
-
-    while (s < es && strchr(whitespace, *s)) {
+    // Avanzar s al próximo token (saltear espacios)
+    while (s < es && strchr(whitespace, *s))
         s++;
-    }
     *ps = s;
+
     return ret;
 }
+
 
 int peek(char **ps, char *es, char *toks)
 {
